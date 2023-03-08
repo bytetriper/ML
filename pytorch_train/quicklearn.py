@@ -25,6 +25,11 @@ class NN_Net(nn.Module):
 class NNET_Arch():
     def __init__(self,inputsize:int,outputsize:int) -> None:
         self.nnet=NN_Net(inputsize,outputsize)
+        if torch.cuda.is_available():
+            self.device=torch.device("cuda")
+        else:
+            self.device=torch.device("cpu")
+        self.nnet.to(self.device)
         self.optimizer=torch.optim.Adam(self.nnet.parameters(),lr=0.01)
     def loss(self,output,y):
         lossf=nn.KLDivLoss(reduction="batchmean")
@@ -46,11 +51,11 @@ def test():
     net=NNET_Arch(100,4)
     loss_his=[]
     for step in range(0,300):
-        dataM.Make_Data(1000,100)
+        dataM.Make_Data(30000,100,net.device)
         batch,label=dataM.Return_Data()
         loss=net.train(batch,label)
         loss_his.append(loss.item())
-    dataM.Make_Data(200,100)
+    dataM.Make_Data(200,100,net.device)
     batch,label=dataM.Return_Data()
     v=dataM.Return_Ans()
     plt.plot(range(len(loss_his)),loss_his)
