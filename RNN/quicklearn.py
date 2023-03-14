@@ -4,11 +4,10 @@ import torch.nn as nn
 import torch.nn.init as init
 from matplotlib import pyplot as plt
 import os
+import random
 from typing import Tuple
 from typing import List
 from typing import Dict
-import numpy as np
-from Data_Manager import Data_Manager
 inputsize=100
 hiddensize=40
 num_layers=2
@@ -98,8 +97,8 @@ class NNET_Wrapper():
         self.nnet=RNN(inputsize,hiddensize,startsign,endsign,device)
         if pretrained:
             self.nnet.load_state_dict(pretrained)
-        self.optimizer=torch.optim.Adam(self.nnet.parameters(),lr=5e-5)
-        self.scheduler=torch.optim.lr_scheduler.ExponentialLR(self.optimizer,0.99)
+        self.optimizer=torch.optim.Adam(self.nnet.parameters(),lr=1e-5)
+        #self.scheduler=torch.optim.lr_scheduler.ExponentialLR(self.optimizer,0.997)
         self.device=device
         self.map=map
         self.startsign=startsign
@@ -128,7 +127,7 @@ class NNET_Wrapper():
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
-        self.scheduler.step()
+        #self.scheduler.step()
         return loss
     def predict(self,prefix:str)->str:
         self.nnet.eval()
@@ -151,32 +150,46 @@ class NNET_Wrapper():
     ###FUCK! I'll Come Back!
 Params={
     'lr':1e-6,
-    'hiddensize':1024,
-    'train_epoch':100,
+    'hiddensize':256,
+    'train_epoch':512,
+    'batch_epoch':16,
+    'batch_size':12,
     'inputsize':len(map),
     'map':map,
     'startsign':'~',
-    'endsign':'\n',
+    'endsign':'`',
     'device':torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 }
-def model_train(nnet:NNET_Wrapper,datasource:str,LossPath:str):
+def model_train(nnet:NNET_Wrapper,datasource:str,LossPath:str,Savepath:str):
     assert(os.path.exists(datasource))
     endsign=';'
     startsign='*'
-    display_interval=10
+    display_interval=4
     with open(datasource,"r",encoding='utf8') as f:
-        txt=f.readlines()[1:]
+        txt=f.readlines()[3:]
     content=''
     for t in txt:
         content+=t
     loss_history=[]
+    content=content.split(',')
+    #print(content)
+    content_len=len(content)
     for i in range(Params['train_epoch']):
-        data=content
+        st=random.randint(0,content_len-Params['batch_size'])
+        end=st+Params['batch_size']
+        data=''
+        for j in range(st,end):
+            data+=content[j]
         #print(data)
-        loss=nnet.train(data)
-        if i%display_interval==0:
-            print(f"epoch:{i:d} Loss:{loss.item():.5f}")
-        loss_history.append(loss.item())
+        #print(data)
+        if len(data)<10:
+            continue
+        for epoch in range(Params['batch_epoch']):
+            loss=nnet.train(data)/len(data)
+            if epoch%display_interval==0:
+                print(f"train_epoch:{i:d} sub_epoch:{epoch:d} Loss:{loss.item():.5f}")
+            loss_history.append(loss.item())
+        save_model(nnet,os.path.join(Savepath,f"model{i:d}.pth"))
     plt.plot(range(len(loss_history)),loss_history)
     plt.savefig(os.path.join(LossPath,"Loss.png"))
     #save_model(nnet,SavePath)
@@ -185,14 +198,14 @@ def create_model()->NNET_Wrapper:
     model=NNET_Wrapper(Params['inputsize'],Params['hiddensize'],Params['map'],Params['startsign'],Params['endsign'],Params['device'],None)
     return model
 def save_model(model:NNET_Wrapper,savepath:str)->None:
-    torch.save({'model':model.nnet.state_dict()},os.path.join(savepath,'model.pth'))
+    torch.save({'model':model.nnet.state_dict()},savepath)
 def load_model(modelpath:str)->NNET_Wrapper:
     state_dict=torch.load(modelpath)['model']
     model=NNET_Wrapper(Params['inputsize'],Params['hiddensize'],Params['map'],Params['startsign'],Params['endsign'],Params['device'],state_dict)
     return model
 if __name__=="__main__":
-    model=load_model(r'/root/autodl-tmp/ML/RNN/model.pth')
+    model=load_model(r'/root/ML/RNN/Model_final.pth')
     #model=create_model()
-    #model_train(model,"/root/autodl-tmp/ML/RNN/data/data.txt","/root/autodl-tmp/ML/RNN")
-    #save_model(model,"/root/autodl-tmp/ML/RNN")
-    print(model.predict("For"))
+    #model_train(model,"/root/ML/RNN/data/data.txt","/root/ML/RNN","/root/ML/RNN/Model")
+    #save_model(model,"/root/ML/RNN/Model_final.pth")
+    print(model.predict(""))
