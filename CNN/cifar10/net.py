@@ -21,28 +21,21 @@ class nnet(nn.Module):
         self.net=nn.Sequential(
             nn.BatchNorm2d(self.dim),
             nn.Conv2d(self.dim,64,7,1,3),
-            nn.ReLU(),nn.Dropout2d(0.4),
+            nn.ReLU(),
             nn.BatchNorm2d(64),
-            nn.Conv2d(64,64,5,2,2),
-            nn.ReLU(),nn.Dropout2d(0.3),
             nn.Conv2d(64,64,5,1,2),
-            
-            nn.ReLU(),nn.Dropout2d(0.2),
+            nn.ReLU(),
             nn.BatchNorm2d(64),
-            nn.Conv2d(64,64,5,2,2),
-            
-            nn.ReLU(),nn.Dropout2d(0.2),
-            nn.Conv2d(64,64,5,1,2),
-            
-            nn.ReLU(),nn.Dropout2d(0.2),
+            nn.Conv2d(64,128,5,1,2),
+            nn.ReLU()
             #nn.BatchNorm2d(128),
         )
         self.fc=nn.Sequential(
-            nn.Linear(8*8*64,64,device=device),
+            nn.Linear(32*32*128,128,device=device),
             nn.ReLU()
         )
         self.fc2=nn.Sequential(
-            nn.Linear(64,outputsize,device=device)
+            nn.Linear(128,outputsize,device=device)
             #nn.ReLU()
         )
         for m in self.modules():
@@ -64,8 +57,8 @@ class NNET_Wrapper():
         else:
             self.nnet=nnet(32,3,10,device)
         self.device=device
-        self.nnet.cuda(device=device)
-        self.optimizer=torch.optim.Adam(self.nnet.parameters(),lr=9e-4)
+        self.nnet.to(device)
+        self.optimizer=torch.optim.Adam(self.nnet.parameters(),lr=3e-4)
         self.scheduler=torch.optim.lr_scheduler.ExponentialLR(self.optimizer,0.85)
         
     def loss(self,data:torch.Tensor,label:torch.Tensor)->torch.Tensor:
@@ -109,7 +102,7 @@ class NNET_Wrapper():
         torch.save(self.nnet,savepath)
 Params={
     "epoch":1,
-    "train_time":20
+    "train_time":10
 }
 def Test_Model(loadpath:str=None):
     Traindata=datasets.CIFAR10(
@@ -134,7 +127,7 @@ def Test_Model(loadpath:str=None):
     plt.savefig(r'/root/autodl-tmp/ML/CNN/cifar10/loss.png')
     model.Save(r'/root/autodl-tmp/ML/CNN/cifar10/model.pth')
 def Predict_Model(modelpath:str)->float:
-    device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device=torch.device('cpu')
     model=NNET_Wrapper(device,modelpath)
     Testdata=datasets.CIFAR10(
         root="/root/autodl-tmp/data",
@@ -147,15 +140,15 @@ def Predict_Model(modelpath:str)->float:
     for d in Testdata:
         data.append(d[0])
         label.append(d[1])
-    data=data[0:5000]
-    label=label[0:5000]
+    #data=data[0:5000]
+    #label=label[0:5000]
     data=torch.stack(data).to(device)
     label=torch.Tensor(label).to(device)
     pi=model.predict(data)
     acc=torch.sum(pi==label)/len(label)
     return acc
 if __name__=="__main__":
-    Test_Model(r'/root/autodl-tmp/ML/CNN/cifar10/model.pth')
-    #Test_Model()
+    #Test_Model(r'/root/autodl-tmp/ML/CNN/cifar10/model.pth')
+    Test_Model()
     acc=Predict_Model(r'/root/autodl-tmp/ML/CNN/cifar10/model.pth')
     print(acc)
