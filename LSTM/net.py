@@ -16,17 +16,18 @@ import sys
 
 
 Params={
-    "hiddensize":1024,
+    "hiddensize":2048,
     "device":torch.device("cuda:0" if torch.cuda.is_available() else "cpu"),
-    "datapath":"/root/autodl-tmp/data/txt/anaphora",
+    "datapath":"/root/autodl-tmp/data/txt/forms",
     "modelpath":"./model.pth",
     "traintime":10,
-    "epoch":40,
+    "epoch":256,
     "LossPath":"./loss.png",
     "FlossPath":"./floss.png",
     "startsign":"#",
     "endsign":"\\",
-    "Norm":1.
+    "Norm":.1,
+    "batchsize":128
 }
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 class nnet(nn.Module):
@@ -49,6 +50,19 @@ class nnet(nn.Module):
             if isinstance(m,nn.Linear):
                 init.xavier_uniform_(m.weight.data)
                 init.zeros_(m.bias.data)
+    def forward_one(self,s:torch.Tensor,h:torch.Tensor,c:torch.Tensor) -> Tuple[torch.Tensor,torch.Tensor,torch.Tensor]:
+        # assert s starts with self.startsign and ends with self.endsign 
+        xt=self.Enc(s)
+        Instate=torch.concat((h,xt))
+        i=torch.sigmoid(self.Wi(Instate))
+        f=torch.sigmoid(self.Wf(Instate))
+        o=torch.sigmoid(self.Wo(Instate))
+        g=torch.tanh(self.Wg(Instate))
+        c=f*c+i*g
+        #f:float(0:1) c:Tensor i:float(0:1) g:float(-1:1)
+        h=o*torch.tanh(c)
+        pi=self.Dec(h)
+        return pi,h,c
     def forward(self,s:List[torch.Tensor],h:torch.Tensor,c:torch.Tensor) -> Tuple[List[torch.Tensor],torch.Tensor,torch.Tensor]:
         # assert s starts with self.startsign and ends with self.endsign 
         lens=len(s)
@@ -72,7 +86,7 @@ class nnet(nn.Module):
         select=self.inputsize
         xt=startvec
         cnt=0
-        maxinum=200
+        maxinum=400
         ans=[]
         while cnt<=maxinum:
             cnt+=1
@@ -102,7 +116,7 @@ class LSTM():
         self.nnet=nnet(self.inputsize,self.hiddensize,self.startsign,self.endsign,device)
         self.nnet.to(device)
         self.device=device
-        self.optimizer=torch.optim.Adam(self.nnet.parameters(),lr=5e-4)
+        self.optimizer=torch.optim.Adam(self.nnet.parameters(),lr=2e-3)
         self.scheduler=torch.optim.lr_scheduler.ExponentialLR(self.optimizer,gamma=0.9)
         self.cnter=self.train_cnt()
     def loss(self,pi:List[torch.Tensor],s:List[torch.Tensor]) -> torch.Tensor:
@@ -130,6 +144,8 @@ class LSTM():
         #context=data.split(".")[101:140] # remove the last empty string
         loss_history=[]
         floss_history=[]
+        Totalloss=0
+        Meanloss=0
         if isinstance(data,list):
             context=[self.Enc.encode(i) for i in data]
         else:
@@ -138,6 +154,7 @@ class LSTM():
         self.nnet.train()
         #print(context[0])
         #print(len(context))
+        print("Training...")
         with tqdm(total=epoch) as pbar:
             pbar.set_description("epoch {}/{}".format(self.cnter.__next__(),Params["traintime"]))
             for i in range(epoch):
@@ -162,12 +179,14 @@ class LSTM():
                 floss+=F.l1_loss(self.nnet.Wo.weight,torch.zeros_like(self.nnet.Wo.weight))*Params["Norm"]
                 floss+=F.l1_loss(self.nnet.Wg.weight,torch.zeros_like(self.nnet.Wg.weight))*Params["Norm"]
                 loss=loss+floss
+                Totalloss+=loss.item()
+                Meanloss=Totalloss/(i+1)
                 #print("Loss:{}".format(loss))
                 loss.backward()
                 loss_history.append(loss.item())
                 floss_history.append(floss.item())
                 pbar.update(1)
-                pbar.set_postfix(loss=loss.item(),lr=self.scheduler.get_last_lr()[-1])
+                pbar.set_postfix(Avgloss=Meanloss,lr=self.scheduler.get_last_lr()[-1])
                 self.optimizer.step()
         self.scheduler.step()
         return loss_history,floss_history
@@ -205,6 +224,7 @@ def test_model(load:bool,save:bool)-> Tuple[LSTM,List[float],List[float]]:
                 #load the files to data
                 with open(os.path.join(root,file),'r',encoding='utf-8') as f:
                     data.append("".join(f.readlines()))
+    print("Data Loaded")
     device=torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     nnet=LSTM(Params["hiddensize"],device)
     if load:
@@ -212,7 +232,7 @@ def test_model(load:bool,save:bool)-> Tuple[LSTM,List[float],List[float]]:
     loss_his=[]
     floss_his=[]
     for time in range(Params["traintime"]):
-        loss_history,floss_history=nnet.train(data,Params["epoch"])
+        loss_history,floss_history=nnet.train(random.sample(data,Params["batchsize"]),Params["epoch"])
         [loss_his.append(i) for i in loss_history]
         [floss_his.append(i) for i in floss_history]
     if save:
