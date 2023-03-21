@@ -33,3 +33,21 @@
 * Most of the time speaks the last sentence, sometimes jibber jabber.
 * Hard to Converge
 
+### LSTM
+
+**SOTA:like a modern poet** (Yet)
+
+**Basic Idea**:
+* classical LSTM with only 1-layer
+* hiddensize=1024 at the moment
+* Use a bit L1-loss to restrict the matrix from overfiting
+* L1-loss doesn't really have significant impact.
+* Trained under a poem dataset (about 20M)
+
+**BaseLine**:
+* Works like a poet.
+* Can be trained to generate a poem with a given first sentence.
+* Final loss about 1.3, but works pretty well.
+
+
+
