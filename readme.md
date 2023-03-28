@@ -50,4 +50,17 @@
 * Final loss about 1.3, but works pretty well.
 
 
+### PCA
+**Basic Idea**:
+** Use a downward CNN to extract features,then upconv to reconstruct the image.
+** Use MSE(now L1_Loss) as loss function
+** After training the net, freeze the downconv part, and add a MLP to do classification.
+
+**BaseLine**:
+** works normally on cifar10
+** PCA works great on cifar10, loss about 0.01. 
+** MLP does some job on the down conv part, accuracy about 54%.
+** still have space to improve.
+
+
 

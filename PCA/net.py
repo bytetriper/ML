@@ -9,18 +9,20 @@ from matplotlib import pyplot as plt
 from tqdm import tqdm
 from typing import List
 from typing import Iterator
+from typing import Union
 from torchvision.transforms import ToTensor
 import numpy as np
 import sys
 Params={
-    "hiddensize":8,
+    "hiddensize":128,
     "device":torch.device("cuda:0" if torch.cuda.is_available() else "cpu"),
     "datapath":"/root/autodl-tmp/data",
     "modelpath":"./model.pth",
+    "classifierpath":"./classifier.pth",
     "traintime":10,
-    "epoch":5,
+    "epoch":15,
     "LossPath":"./loss.png",
-    "FlossPath":"./floss.png",
+    "ClassifylossPath":"./floss.png",
     "batchsize":128,
     "imgpath":"./img.png",
     "imgpath_origin":"./img_origin.png",
@@ -33,7 +35,7 @@ class PCA(nn.Module):
             nn.BatchNorm2d(32),
             nn.ReLU(),
             nn.Dropout2d(0.2),
-            nn.Conv2d(32,64,5,1,2),
+            nn.Conv2d(32,64,7,1,3),
             nn.BatchNorm2d(64),
             nn.ReLU(),
             nn.Dropout2d(0.2),
@@ -41,13 +43,18 @@ class PCA(nn.Module):
             nn.BatchNorm2d(64),
             nn.ReLU(),
             nn.Dropout2d(0.2),
+            nn.Conv2d(64,64,5,1,2),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.Dropout2d(0.2),
             nn.Conv2d(64,64,3,1,1),
             nn.BatchNorm2d(64),
             nn.ReLU(),
             nn.Dropout2d(0.2),
-            nn.Conv2d(64,hiddensize,5,2,2),
-            nn.BatchNorm2d(hiddensize),
+            nn.Conv2d(64,64,5,2,2),
+            nn.BatchNorm2d(64),
             nn.ReLU(),
+            nn.Dropout2d(0.2),
             nn.Conv2d(64,hiddensize,5,2,2),
             nn.BatchNorm2d(hiddensize),
             nn.ReLU(),
@@ -57,25 +64,51 @@ class PCA(nn.Module):
             nn.ConvTranspose2d(hiddensize,64,kernel_size=5,stride=2,padding=2,output_padding=1),
             nn.BatchNorm2d(64),
             nn.ReLU(),
-            nn.ConvTranspose2d(64,64,kernel_size=5,stride=2,padding=2,output_padding=1),
+            nn.Conv2d(64,64,3,1,1),
             nn.BatchNorm2d(64),
             nn.ReLU(),
             nn.ConvTranspose2d(64,64,kernel_size=5,stride=2,padding=2,output_padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.Conv2d(64,64,5,1,2),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.ConvTranspose2d(64,64,kernel_size=5,stride=2,padding=2,output_padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.Conv2d(64,64,7,1,3),
             nn.BatchNorm2d(64),
             nn.ReLU(),
             #nn.ConvTranspose2d(64,64,kernel_size=5,stride=2,padding=2,output_padding=1),
             #nn.BatchNorm2d(64),
             #nn.ReLU()
         )
-        self.Conv2one=nn.Conv2d(64,input_channel,5,1,2)
-        self.Normal=F.normalize
+        #self.BN=nn.BatchNorm2d(64)
+        self.Conv2one=nn.Conv2d(64,input_channel,7,1,3)
     def forward(self,s):
+        #print(s.shape)
         s=self.Down_Net(s)
         #print(s.shape)
         s=self.Up_Net(s)
         #print(s.shape)
         s=self.Conv2one(s)
-        #normalize s into 0-1
+        return s
+class Mini_Classifier(nn.Module):
+    def __init__(self,Feature_Extractor:nn.Sequential) -> None:
+        super(Mini_Classifier,self).__init__()
+        self.Feature_Extractor=Feature_Extractor
+        self.fc=nn.Linear(2048,2048)
+        self.activation=nn.ReLU()
+        self.fc2=nn.Linear(2048,10)
+    def forward(self,s):
+        s=self.Feature_Extractor(s)
+        # to detach and flatten the tensor(prevent gradient flow back to the feature extractor)
+        
+        s=s.view(s.size(0),-1)
+        #s=s.detach()
+        s=self.fc(s)
+        s=self.activation(s)
+        s=self.fc2(s)
         return s
 class NNET():
     def __init__(self,inputsize:int,hiddensize:int,device:torch.device) -> None:
@@ -84,7 +117,7 @@ class NNET():
         self.device=device
         self.net=PCA(inputsize,hiddensize)
         self.net.to(self.device)
-        self.optimizer=torch.optim.Adam(self.net.parameters(),lr=0.01)
+        self.optimizer=torch.optim.Adam(self.net.parameters(),lr=8e-4)
         self.scheduler=torch.optim.lr_scheduler.StepLR(self.optimizer,step_size=100,gamma=0.9)
         self.cnter=self.train_cnt()
     def train_cnt(self)->Iterator[int]:
@@ -95,22 +128,28 @@ class NNET():
     def train(self,datalist:DataLoader,epoch:int) -> List[float]:
         self.net.train()
         loss_his=[]
+        # keep track of average loss during training
+        total_loss=0
+        avg_loss=0
         for i in range(epoch):
-            bar=tqdm(range(len(datalist)))
+            bar=tqdm(range(1,len(datalist)))
             bar.set_description_str("Epoch:{}".format(i))
+            total_loss=0
             for batch_idx,(data,label) in enumerate(datalist):
                 data,label=data.to(self.device),label.to(self.device)
                 self.optimizer.zero_grad()
                 output=self.net(data)
-                loss=F.mse_loss(output,data)
+                loss=F.l1_loss(output,data)
                 loss.backward()
                 loss_his.append(loss.item())
+                total_loss+=loss.item()
+                avg_loss=total_loss/(batch_idx+1)
                 self.optimizer.step()
                 bar.update(1)
-                bar.set_postfix_str('SubEpoch: {} [{}/{} ({:.0f}%)] Loss: {:.6f}'.format(
+                bar.set_postfix_str('SubEpoch: {} [{}/{} ({:.0f}%)] Loss: {:.3f}| lr: {:.3e}'.format(
                         batch_idx, batch_idx, len(datalist),
-                        100.*batch_idx/len(datalist), loss.item()))
-            self.scheduler.step()
+                        100.*batch_idx/len(datalist), avg_loss,self.scheduler.get_last_lr()[0]))
+                self.scheduler.step()
         return loss_his
     def simple_train(self,data:torch.Tensor,epoch:int)->List[float]:
         self.net.train()
@@ -136,6 +175,51 @@ class NNET():
             data=data.to(self.device)
             output=self.net(data)
             return output
+class Classifier_Model():
+    def __init__(self,model:Union[NNET,Mini_Classifier],device:torch.device) -> None:
+        if isinstance(model,NNET):
+            self.model=Mini_Classifier(model.net.Down_Net)
+        elif isinstance(model,Mini_Classifier):
+            self.model=model
+        else:
+            raise TypeError("model must be NNET or Mini_Classifier")
+        self.device=device
+        # may encounter error when using different device on Down_net and Mini_Classifier
+        self.model.to(device)
+        self.optimizer=torch.optim.Adam(self.model.parameters(),lr=8e-3)
+        self.scheduler=torch.optim.lr_scheduler.StepLR(self.optimizer,step_size=100,gamma=0.9)
+    def train(self,datalist:DataLoader,epoch:int) -> List[float]:
+        self.model.train()
+        loss_his=[]
+        # keep track of average loss during training
+        total_loss=0
+        avg_loss=0
+        for i in range(epoch):
+            bar=tqdm(range(len(datalist)))
+            bar.set_description_str("Epoch:{}".format(i))
+            total_loss=0
+            for batch_idx,(data,label) in enumerate(datalist):
+                data,label=data.to(self.device),label.to(self.device)
+                self.optimizer.zero_grad()
+                output=self.model(data)
+                loss=F.cross_entropy(output,label)
+                loss.backward()
+                loss_his.append(loss.item())
+                total_loss+=loss.item()
+                avg_loss=total_loss/(batch_idx+1)
+                self.optimizer.step()
+                bar.update(1)
+                bar.set_postfix_str('SubEpoch: {} [{}/{} ({:.0f}%)] Loss: {:.3f}| lr: {:.3e}'.format(
+                        batch_idx, batch_idx, len(datalist),
+                        100.*batch_idx/len(datalist), avg_loss,self.scheduler.get_last_lr()[0]))
+                self.scheduler.step()
+        return loss_his
+    def predict(self,data:torch.Tensor) -> torch.Tensor:
+        self.model.eval()
+        with torch.no_grad():
+            data=data.to(self.device)
+            output=self.model(data)
+            return output
 # save model
 def save_model(model:nn.Module,path:str):
     torch.save(model.state_dict(),path)
@@ -147,28 +231,58 @@ def load_model(model:nn.Module,path:str):
 def create_model(inputsize:int,hiddensize:int,device:torch.device)->NNET:
     return NNET(inputsize,hiddensize,device)
 
-def test_model(load:bool=False,save:bool=False)->NNET:
+def train_model(load:bool=False,save:bool=False)->NNET:
     torch.cuda.empty_cache()
     Dataset=datasets.CIFAR10(root=Params["datapath"],train=True,download=False,transform=ToTensor())
     trainloader=DataLoader(Dataset,batch_size=Params["batchsize"],shuffle=True)
-    #move the data in dataset into GPU using for loop and .to method
-    #for i in range(len(Dataset)):
-    #    Dataset[i]=(Dataset[i][0].to(Params["device"]),Dataset[i][1])
-    datalist=[]
-    #for data,_ in trainloader:
-    #    data=data.to(Params["device"])
-    #    data=F.normalize(data)
-    #    datalist.append(data)
     device = Params["device"]
-    net=create_model(3,64,device)
+    net=create_model(3,128,device)
     if load:
         load_model(net.net,Params["modelpath"])
     loss=net.train(trainloader,Params["epoch"])
     plt.plot(range(len(loss)),loss)
     plt.savefig(Params["LossPath"])
+    plt.clf()
     if save:
         save_model(net.net,Params["modelpath"])
     return net
+#create a classifier model using the pretrained NNET model
+def create_classifier(net:NNET,device:torch.device)->Classifier_Model:
+    return Classifier_Model(net,device)
+#load a classifier model for testing
+def load_classifier(path:str,device:torch.device)->Classifier_Model:
+    model=torch.load(path)
+    classifier=Classifier_Model(model,device)
+    return classifier
+#test the accuracy of Classifier_Model on cifar10 testset, and return the accuracy
+def test_classfier(classifier:Classifier_Model,save:bool=False)->float:
+    torch.cuda.empty_cache()
+    Dataset=datasets.CIFAR10(root=Params["datapath"],train=False,download=False,transform=ToTensor())
+    testloader=DataLoader(Dataset,batch_size=Params["batchsize"],shuffle=True)
+    correct=0
+    total=0
+    with torch.no_grad():
+        for data,label in testloader:
+            data,label=data.to(Params["device"]),label.to(Params["device"])
+            output=classifier.predict(data)
+            _,predicted=torch.max(output.data,1)
+            total+=label.size(0)
+            correct+=(predicted==label).sum().item()
+    acc=correct/total
+    if save:
+        save_model(classifier.model,Params["classifierpath"])
+    return acc
+def train_classifier(classifier:Classifier_Model,save:bool=False)->None:
+    torch.cuda.empty_cache()
+    Dataset=datasets.CIFAR10(root=Params["datapath"],train=True,download=False,transform=ToTensor())
+    trainloader=DataLoader(Dataset,batch_size=Params["batchsize"],shuffle=True)
+    loss=classifier.train(trainloader,Params["epoch"])
+    plt.plot(range(len(loss)),loss)
+    plt.savefig(Params["ClassifylossPath"])
+    plt.clf()
+    if save:
+        torch.save(classifier.model,Params["classifierpath"])
+    return
 #show a img in CIFAR10 and prediction from a NNET model
 def show_img(net:NNET,dataset:datasets.CIFAR10):
     # show a random img in CIFAR10
@@ -180,34 +294,66 @@ def show_img(net:NNET,dataset:datasets.CIFAR10):
     output=output.cpu()
     output=output.detach().numpy()
     #output=(output+1)/2
+    print(np.mean(np.square(output-img.numpy())))
     output=np.transpose(output,(1,2,0))
     plt.imshow(output)
     plt.savefig(Params["imgpath"])
+    plt.clf()
     plt.imshow(img.numpy().transpose(1,2,0))
     plt.savefig(Params["imgpath_origin"])
+    plt.clf()
     return label
 if __name__ == "__main__":
     # read from argv[1] to decide whether to train or not(if "train" then train,otherwise test only)
     if len(sys.argv)>1:
+        #if argv[2] is "PCA" then train NNET, otherwise train Classifier_Model
+        #if sys.argv[2]=="PCA", then use sys.argv[3] to decide whether to load model or to train
+        #if sys.argv[2]=="classify",then load a NNET from modelpath to init a classifier,and train it using train_classifier
         if sys.argv[1]=="train":
-            # read from argv[2] to decide whether to load model or not(if "load" then load,otherwise create a new model)
-            if len(sys.argv)>2:
-                if sys.argv[2]=="load":
-                    net=test_model(load=True,save=True)
+            if sys.argv[2]=="PCA":
+                if sys.argv[3]=="load":
+                    net=train_model(True,True)
                 else:
-                    if sys.argv[2]=="new":
-                        net=test_model(load=False,save=True)
-                    else:
-                        raise RuntimeError("Inappropriate argv[2]")
+                    net=train_model(False,True)
+                # use show_img to show a img in CIFAR10 and prediction from a NNET model
+                Dataset=datasets.CIFAR10(root=Params["datapath"],train=True,download=False,transform=ToTensor())
+                label=show_img(net,Dataset)
+            elif sys.argv[2]=="classify":
+                #use sys.argv[3] to decide whether to load a classifier or to create a new one
+                if sys.argv[3]=="load":
+                    classifier=load_classifier(Params["classifierpath"],Params["device"])
+                elif sys.argv[3]=="new":
+                    net=create_model(3,128,Params["device"])
+                    load_model(net.net,Params["modelpath"])
+                    classifier=create_classifier(net,Params["device"])
+                else:
+                    raise KeyError("please input a valid command")
+                train_classifier(classifier,True)
+            #otherwise raise a keyerror
             else:
-                raise RuntimeError("Please input argv[2] to decide whether to load model or not(if 'load' then load,otherwise create a new model)")
-        else:# create class NNET and load model
-            net=create_model(3,64,Params["device"])
-            load_model(net.net,Params["modelpath"])
-    else:
-        raise RuntimeError("Please input argv[1] to decide whether to train or not(if 'train' then train,otherwise test only)")
-    Dataset=datasets.CIFAR10(root=Params["datapath"],train=True,download=False,transform=ToTensor())
-    # assure that net is not unbounded
-    label=show_img(net,Dataset)
-    print(label)
+                raise KeyError("please input a valid command")
+        elif sys.argv[1]=="test":
+            if sys.argv[2]=="PCA":
+                net=create_model(3,Params["hiddensize"],Params["device"])
+                load_model(net.net,Params["modelpath"])
+                Dataset=datasets.CIFAR10(root=Params["datapath"],train=True,download=False,transform=ToTensor())
+                label=show_img(net,Dataset)
+            elif sys.argv[2]=="classify":
+                # if sys.argv[3]=="load", then load a classifier from classifierpath and test it,otherwise create a classifier and test it
+                if sys.argv[3]=="load":
+                    classifier=load_classifier(Params["classifierpath"],Params["device"])
+                elif sys.argv[3]=="new":
+                    net=create_model(3,Params["hiddensize"],Params["device"])
+                    load_model(net.net,Params["modelpath"])
+                    classifier=create_classifier(net,Params["device"])
+                else:
+                    raise KeyError("please input a valid command")
+                #test the classfier and print the accuracy in a pretty way
+                acc=test_classfier(classifier)
+                print("the accuracy of the classifier is: {:.2f}%".format(acc*100))
+            else:
+                raise KeyError("please input a valid command")
+        else:
+            raise KeyError("please input a valid command")
+
 
