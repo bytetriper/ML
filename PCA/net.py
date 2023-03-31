@@ -13,6 +13,7 @@ from typing import Union
 from torchvision.transforms import ToTensor
 import numpy as np
 import sys
+import PIL.Image as Image
 Params={
     "hiddensize":128,
     "device":torch.device("cuda:0" if torch.cuda.is_available() else "cpu"),
@@ -284,17 +285,24 @@ def train_classifier(classifier:Classifier_Model,save:bool=False)->None:
         torch.save(classifier.model,Params["classifierpath"])
     return
 #show a img in CIFAR10 and prediction from a NNET model
-def show_img(net:NNET,dataset:datasets.CIFAR10):
+def show_img(net:NNET,dataset:datasets.CIFAR10,imgpath:str=''):
     # show a random img in CIFAR10
     img,label=dataset[np.random.randint(0,len(dataset))]
+    #otherwise show the img in imgpath as a numpy array
+    if imgpath!='':
+        img=Image.open(imgpath)
+        img=ToTensor()(img)
+        print(img)
     Inputimg=img.unsqueeze(0)
     Inputimg=Inputimg.to(Params["device"])
+    #print(Inputimg)
     output=net.predict(Inputimg)
     output=output.squeeze(0)
     output=output.cpu()
     output=output.detach().numpy()
+    print(output)
     #output=(output+1)/2
-    print(np.mean(np.square(output-img.numpy())))
+    print(np.abs(output-img.numpy()).mean())
     output=np.transpose(output,(1,2,0))
     plt.imshow(output)
     plt.savefig(Params["imgpath"])
