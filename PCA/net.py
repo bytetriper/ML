@@ -10,7 +10,7 @@ from tqdm import tqdm
 from typing import List
 from typing import Iterator
 from typing import Union
-from torchvision.transforms import ToTensor
+from torchvision.transforms import ToTensor,RandomHorizontalFlip,RandomAdjustSharpness,RandomVerticalFlip,Compose
 import numpy as np
 import sys
 import PIL.Image as Image
@@ -21,10 +21,10 @@ Params={
     "modelpath":"./model.pth",
     "classifierpath":"./classifier.pth",
     "traintime":10,
-    "epoch":15,
+    "epoch":400,
     "LossPath":"./loss.png",
     "ClassifylossPath":"./floss.png",
-    "batchsize":128,
+    "batchsize":512,
     "imgpath":"./img.png",
     "imgpath_origin":"./img_origin.png",
 }
@@ -35,27 +35,27 @@ class PCA(nn.Module):
             nn.Conv2d(input_channel,32,5,1,2),
             nn.BatchNorm2d(32),
             nn.ReLU(),
-            nn.Dropout2d(0.2),
+            #nn.Dropout2d(0.2),
             nn.Conv2d(32,64,7,1,3),
             nn.BatchNorm2d(64),
             nn.ReLU(),
-            nn.Dropout2d(0.2),
+            #nn.Dropout2d(0.2),
             nn.Conv2d(64,64,5,2,2), 
             nn.BatchNorm2d(64),
             nn.ReLU(),
-            nn.Dropout2d(0.2),
+            #nn.Dropout2d(0.2),
             nn.Conv2d(64,64,5,1,2),
             nn.BatchNorm2d(64),
             nn.ReLU(),
-            nn.Dropout2d(0.2),
+            #nn.Dropout2d(0.2),
             nn.Conv2d(64,64,3,1,1),
             nn.BatchNorm2d(64),
             nn.ReLU(),
-            nn.Dropout2d(0.2),
+            #nn.Dropout2d(0.2),
             nn.Conv2d(64,64,5,2,2),
             nn.BatchNorm2d(64),
             nn.ReLU(),
-            nn.Dropout2d(0.2),
+            #nn.Dropout2d(0.2),
             nn.Conv2d(64,hiddensize,5,2,2),
             nn.BatchNorm2d(hiddensize),
             nn.ReLU(),
@@ -98,6 +98,8 @@ class Mini_Classifier(nn.Module):
     def __init__(self,Feature_Extractor:nn.Sequential) -> None:
         super(Mini_Classifier,self).__init__()
         self.Feature_Extractor=Feature_Extractor
+        # save the parameters of the feature extractor
+        self.saved_Params=nn.ParameterList([self.Feature_Extractor])
         self.fc=nn.Linear(2048,2048)
         self.activation=nn.ReLU()
         self.fc2=nn.Linear(2048,10)
@@ -118,8 +120,8 @@ class NNET():
         self.device=device
         self.net=PCA(inputsize,hiddensize)
         self.net.to(self.device)
-        self.optimizer=torch.optim.Adam(self.net.parameters(),lr=8e-4)
-        self.scheduler=torch.optim.lr_scheduler.StepLR(self.optimizer,step_size=100,gamma=0.9)
+        self.optimizer=torch.optim.Adam(self.net.parameters(),lr=8e-5)
+        self.scheduler=torch.optim.lr_scheduler.StepLR(self.optimizer,step_size=300,gamma=0.9)
         self.cnter=self.train_cnt()
     def train_cnt(self)->Iterator[int]:
         cnt=1
@@ -142,7 +144,7 @@ class NNET():
                 output=self.net(data)
                 loss=F.l1_loss(output,data)
                 loss.backward()
-                loss_his.append(loss.item())
+                loss_his.append(min(loss.item(),2.))
                 total_loss+=loss.item()
                 avg_loss=total_loss/(batch_idx+1)
                 self.optimizer.step()
@@ -234,7 +236,13 @@ def create_model(inputsize:int,hiddensize:int,device:torch.device)->NNET:
 
 def train_model(load:bool=False,save:bool=False)->NNET:
     torch.cuda.empty_cache()
-    Dataset=datasets.CIFAR10(root=Params["datapath"],train=True,download=False,transform=ToTensor())
+    Dataset=datasets.CIFAR10(root=Params["datapath"],train=True,download=False,transform=Compose([
+        RandomHorizontalFlip(),
+        RandomVerticalFlip(),
+        RandomAdjustSharpness(0.1),
+        ToTensor()
+    ])
+    )
     trainloader=DataLoader(Dataset,batch_size=Params["batchsize"],shuffle=True)
     device = Params["device"]
     net=create_model(3,128,device)
@@ -273,9 +281,18 @@ def test_classfier(classifier:Classifier_Model,save:bool=False)->float:
     if save:
         save_model(classifier.model,Params["classifierpath"])
     return acc
+rand_idx=np.random.choice(50000,2000)
 def train_classifier(classifier:Classifier_Model,save:bool=False)->None:
     torch.cuda.empty_cache()
-    Dataset=datasets.CIFAR10(root=Params["datapath"],train=True,download=False,transform=ToTensor())
+    Dataset=datasets.CIFAR10(root=Params["datapath"],train=True,download=False,transform=Compose([
+        RandomHorizontalFlip(),
+        RandomVerticalFlip(),
+        RandomAdjustSharpness(0.1),
+        ToTensor()
+    ]))
+    #random choice 5000 idx from cifar10 trainset
+    Dataset.data=[Dataset.data[i] for i in rand_idx]
+    Dataset.targets=[Dataset.targets[i] for i in rand_idx]
     trainloader=DataLoader(Dataset,batch_size=Params["batchsize"],shuffle=True)
     loss=classifier.train(trainloader,Params["epoch"])
     plt.plot(range(len(loss)),loss)
@@ -300,7 +317,6 @@ def show_img(net:NNET,dataset:datasets.CIFAR10,imgpath:str=''):
     output=output.squeeze(0)
     output=output.cpu()
     output=output.detach().numpy()
-    print(output)
     #output=(output+1)/2
     print(np.abs(output-img.numpy()).mean())
     output=np.transpose(output,(1,2,0))

@@ -18,16 +18,16 @@ import sys
 Params={
     "hiddensize":2048,
     "device":torch.device("cuda:0" if torch.cuda.is_available() else "cpu"),
-    "datapath":"/root/autodl-tmp/data/txt/forms",
+    "datapath":"/root/autodl-tmp/data/code/kernel",
     "modelpath":"./model.pth",
     "traintime":10,
-    "epoch":256,
+    "epoch":50,
     "LossPath":"./loss.png",
     "FlossPath":"./floss.png",
     "startsign":"#",
     "endsign":"\\",
     "Norm":.1,
-    "batchsize":128
+    "batchsize":20
 }
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 class nnet(nn.Module):
@@ -86,7 +86,7 @@ class nnet(nn.Module):
         select=self.inputsize
         xt=startvec
         cnt=0
-        maxinum=400
+        maxinum=2000
         ans=[]
         while cnt<=maxinum:
             cnt+=1
@@ -160,13 +160,18 @@ class LSTM():
             for i in range(epoch):
                 self.optimizer.zero_grad()
                 #print("Input:{}".format(len(s)))
-                seq_len=random.randint(min(len(context),10),max(len(context),100))
                 if isinstance(data,list):#random select a context
                     context_slice=random.choice(context)
-                    context_slice=context_slice[0:seq_len]
+                    rand_st=random.randint(0,max(10,len(context_slice)-500))
+                    rand_end=random.randint(rand_st+20,min(rand_st+500,len(context_slice)))
+                    context_slice=context_slice[rand_st:rand_end]
+                    #context_slice=context_slice[0:seq_len]
                 else:#use the whole context
                     context_slice=context
-                    context_slice=context_slice[0:seq_len]
+                    rand_st=random.randint(0,max(10,len(context_slice)-500))
+                    rand_end=random.randint(rand_st+20,min(rand_st+500,len(context_slice)))
+                    context_slice=context_slice[rand_st:rand_end]
+                    #context_slice=context_slice[0:seq_len]
                 #print(len(context_slice))
                 #assert(isinstance(context_slice,list))
                 h=torch.zeros(self.hiddensize,device=self.device)
@@ -186,7 +191,7 @@ class LSTM():
                 loss_history.append(loss.item())
                 floss_history.append(floss.item())
                 pbar.update(1)
-                pbar.set_postfix(Avgloss=Meanloss,lr=self.scheduler.get_last_lr()[-1])
+                pbar.set_postfix(Avgloss=Meanloss,lr=self.scheduler.get_last_lr()[-1],seq_len=len(context_slice))
                 self.optimizer.step()
         self.scheduler.step()
         return loss_history,floss_history
@@ -219,11 +224,16 @@ def test_model(load:bool,save:bool)-> Tuple[LSTM,List[float],List[float]]:
         # walk through the directory Params["datapath"] and load all the files
         data=[]
         for root,dirs,files in os.walk(Params["datapath"]):
-            #load the files
+            #load the files with name ends with ".h"
             for file in files:
                 #load the files to data
-                with open(os.path.join(root,file),'r',encoding='utf-8') as f:
-                    data.append("".join(f.readlines()))
+                if file.endswith(".h") or file.endswith(".c"):
+                    with open(os.path.join(root,file),'r',encoding='utf-8') as f:
+                        # read in all the lines in file and replace "\n\n" with "\n","\t" with "","\r" with ""
+                        content="".join(f.readlines()).replace("\n\n","\n").replace("\t","").replace("\r","")
+                        #print(content)
+                        data.append(content)
+    print(len(data))
     print("Data Loaded")
     device=torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     nnet=LSTM(Params["hiddensize"],device)
