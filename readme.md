@@ -76,4 +76,19 @@
 * Have an accuracy of about **43%** when train set size is 2000 with pre-data augmentation.
 * Have an accuracy of about **37%** when train set size if 6000 with no data augmentation.
 
+### Style-Transfer
+
+**Basic Idea**:
+* Use a Pretrained VGG16 as base model
+* Use Gram-matrix to copy texture and feature inversion to copy content
+* Almost the same with CS231n 2017 spring's class demo
+* No FastCNN, just the basics
+* Tried on PCA(or trained classifier on CIFAR10), but did not work well.
+* Larger images usually have better performance
+* use a decaying weight of $0.9^n$ on the gram-matrix of layer n
+* use $R(x)=\sum\limits_{i=1}^{n}(x_i-x_{i+1})^2$ as regularization
+
+**BaseLine**:
+* Worked pretty well, especially on big pics.
+* a demo is [here](Style_Transfer/output.jpg), trained with a 2k img of Vangogh's <Starry Night>.
 
