@@ -21,7 +21,7 @@ Params={
     "modelpath":"./model.pth",
     "classifierpath":"./classifier.pth",
     "traintime":10,
-    "epoch":400,
+    "epoch":40,
     "LossPath":"./loss.png",
     "ClassifylossPath":"./floss.png",
     "batchsize":512,
@@ -190,7 +190,7 @@ class Classifier_Model():
         # may encounter error when using different device on Down_net and Mini_Classifier
         self.model.to(device)
         self.optimizer=torch.optim.Adam(self.model.parameters(),lr=8e-3)
-        self.scheduler=torch.optim.lr_scheduler.StepLR(self.optimizer,step_size=100,gamma=0.9)
+        self.scheduler=torch.optim.lr_scheduler.StepLR(self.optimizer,step_size=300,gamma=0.9)
     def train(self,datalist:DataLoader,epoch:int) -> List[float]:
         self.model.train()
         loss_his=[]
@@ -260,7 +260,10 @@ def create_classifier(net:NNET,device:torch.device)->Classifier_Model:
     return Classifier_Model(net,device)
 #load a classifier model for testing
 def load_classifier(path:str,device:torch.device)->Classifier_Model:
-    model=torch.load(path)
+    tmpmodel=create_model(3,Params["hiddensize"],device)
+    model=Mini_Classifier(tmpmodel.net.Down_Net)
+    #print(torch.load(path))
+    model.load_state_dict(torch.load(path))
     classifier=Classifier_Model(model,device)
     return classifier
 #test the accuracy of Classifier_Model on cifar10 testset, and return the accuracy
@@ -283,7 +286,6 @@ def test_classfier(classifier:Classifier_Model,save:bool=False)->float:
     return acc
 rand_idx=np.random.choice(50000,2000)
 def train_classifier(classifier:Classifier_Model,save:bool=False)->None:
-    torch.cuda.empty_cache()
     Dataset=datasets.CIFAR10(root=Params["datapath"],train=True,download=False,transform=Compose([
         RandomHorizontalFlip(),
         RandomVerticalFlip(),
@@ -291,15 +293,15 @@ def train_classifier(classifier:Classifier_Model,save:bool=False)->None:
         ToTensor()
     ]))
     #random choice 5000 idx from cifar10 trainset
-    Dataset.data=[Dataset.data[i] for i in rand_idx]
-    Dataset.targets=[Dataset.targets[i] for i in rand_idx]
+    #Dataset.data=[Dataset.data[i] for i in rand_idx]
+    #Dataset.targets=[Dataset.targets[i] for i in rand_idx]
     trainloader=DataLoader(Dataset,batch_size=Params["batchsize"],shuffle=True)
     loss=classifier.train(trainloader,Params["epoch"])
     plt.plot(range(len(loss)),loss)
     plt.savefig(Params["ClassifylossPath"])
     plt.clf()
     if save:
-        torch.save(classifier.model,Params["classifierpath"])
+        torch.save(classifier.model.state_dict(),Params["classifierpath"])
     return
 #show a img in CIFAR10 and prediction from a NNET model
 def show_img(net:NNET,dataset:datasets.CIFAR10,imgpath:str=''):
@@ -327,7 +329,7 @@ def show_img(net:NNET,dataset:datasets.CIFAR10,imgpath:str=''):
     plt.savefig(Params["imgpath_origin"])
     plt.clf()
     return label
-if __name__ == "__main__":
+if __name__ != "__main__":
     # read from argv[1] to decide whether to train or not(if "train" then train,otherwise test only)
     if len(sys.argv)>1:
         #if argv[2] is "PCA" then train NNET, otherwise train Classifier_Model
@@ -379,5 +381,6 @@ if __name__ == "__main__":
                 raise KeyError("please input a valid command")
         else:
             raise KeyError("please input a valid command")
-
+else:
+    print(torch.load(Params["classifierpath"]).keys())
 
